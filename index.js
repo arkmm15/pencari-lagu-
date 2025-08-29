@@ -1,5 +1,8 @@
-// index.js
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@adiwajshing/baileys');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys'); // ✅ pakai fork terbaru
 const pino = require('pino');
 const ytSearch = require('yt-search');
 const youtubedl = require('youtube-dl-exec');
@@ -16,14 +19,19 @@ async function start() {
     logger,
     printQRInTerminal: true,
     auth: state,
-    version
+    version,
+    browser: ["Chrome (Linux)", "Chrome", "121.0.6167.140"] // ✅ spoof browser
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
-    const { connection } = update;
-    if (connection === 'open') console.log('✅ Bot WhatsApp aktif!');
+    const { connection, lastDisconnect } = update;
+    if (connection === 'open') {
+      console.log('✅ Bot WhatsApp aktif!');
+    } else if (connection === 'close') {
+      console.log('❌ Koneksi terputus:', lastDisconnect?.error?.message);
+    }
   });
 
   sock.ev.on('messages.upsert', async (m) => {
@@ -32,40 +40,39 @@ async function start() {
       if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
       const from = msg.key.remoteJid;
-      const text = (msg.message.conversation ||
-                   msg.message.extendedTextMessage?.text || '').trim();
+      const text =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        '';
 
-      // 👉 Command: .cari <judul lagu>
-      if (text.toLowerCase().startsWith('.cari ')) {
-        const query = text.split(' ').slice(1).join(' ');
+      // 👉 Command: .cari <judul>
+      if (text.startsWith('.cari ')) {
+        const query = text.slice(6).trim();
         if (!query) {
-          await sock.sendMessage(from, { text: '❌ Masukkan judul lagu.\n\nContoh: `.cari bohemian rhapsody`' }, { quoted: msg });
+          await sock.sendMessage(from, { text: '❌ Masukkan judul lagu.\nContoh: `.cari bohemian rhapsody`' }, { quoted: msg });
           return;
         }
 
-        await sock.sendMessage(from, { text: `🔎 Sedang mencari lagu: *${query}* ...` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `🔎 Mencari: *${query}* ...` }, { quoted: msg });
 
-        // Cari di YouTube
         const searchRes = await ytSearch(query);
         if (!searchRes.videos.length) {
-          await sock.sendMessage(from, { text: `❌ Lagu tidak ditemukan untuk: *${query}*` }, { quoted: msg });
+          await sock.sendMessage(from, { text: `❌ Tidak ditemukan hasil untuk: ${query}` }, { quoted: msg });
           return;
         }
 
-        const vid = searchRes.videos[0]; // ambil hasil pertama
+        const vid = searchRes.videos[0];
         const videoUrl = vid.url;
         const title = vid.title;
         const channel = vid.author?.name || 'Unknown';
 
-        await sock.sendMessage(from, { text: `✅ Ketemu: *${title}*\n🎤 Channel: ${channel}\n⬇️ Mengunduh MP3, tunggu sebentar...` }, { quoted: msg });
+        await sock.sendMessage(from, { text: `✅ Ditemukan: *${title}*\n🎤 Channel: ${channel}\n⬇️ Sedang mengunduh MP3...` }, { quoted: msg });
 
-        // Path sementara
         const tmpDir = os.tmpdir();
         const safeName = title.replace(/[^a-z0-9_\-\.]/gi, '_').slice(0, 50);
         const outPath = path.join(tmpDir, `${safeName}_${Date.now()}.mp3`);
 
         try {
-          // Download audio
           await youtubedl(videoUrl, {
             extractAudio: true,
             audioFormat: 'mp3',
@@ -84,13 +91,12 @@ async function start() {
 
           await sock.sendMessage(from, { text: `🎶 Selesai: *${title}*` }, { quoted: msg });
         } catch (err) {
-          console.error(err);
+          console.error('❌ Error unduh:', err);
           await sock.sendMessage(from, { text: '❌ Gagal mengunduh lagu.' }, { quoted: msg });
         } finally {
           if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
         }
       }
-
     } catch (e) {
       console.error('messages.upsert error', e);
     }
